@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Ad Wear-Out Risk Calculator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load React and ReactDOM -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+    <!-- Load Babel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/6.26.0/babel.min.js"></script>
+    
+    <style>
+        body { background-color: #f8fafc; }
+        .risk-dial-circle { transition: stroke-dashoffset 1s ease-in-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+
+        // --- 1. GLOBAL CONFIGURATION ---
+
+        // Weights for calculation (Heuristic Model)
+        const CHANNELS_SATURATION_RISK = {
+            'TV': 1.0,      // Highest saturation risk
+            'META': 0.8,    
+            'Youtube': 0.7, 
+            'Tiktok': 0.7,  
+            'OTT': 0.6,     
+            'OOH': 0.3,     
+            'Radio': 0.2,   
+        };
+        const CHANNELS_WEIGHT = 20; 
+        const CREATIVE_TYPE_WEIGHT = 10; 
+
+        // Market-Specific Benchmarks (Derived from Global Request Data)
+        const CONFIG_BY_COUNTRY = {
+            // APAC
+            'PAKISTAN': { label: 'Pakistan', FREQ_MIN: 3, FREQ_MAX: 12, RECALL_META_CHANGE_MIN: -10, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -7, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 1.5, GAIN_MAX: 3.0, SOS_MIN: 10, SOS_MAX: 50 },
+            'INDIA': { label: 'India', FREQ_MIN: 6, FREQ_MAX: 16, RECALL_META_CHANGE_MIN: -12, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -9, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 3.0, GAIN_MAX: 5.0, SOS_MIN: 20, SOS_MAX: 70 },
+            'MALAYSIA': { label: 'Malaysia', FREQ_MIN: 5, FREQ_MAX: 14, RECALL_META_CHANGE_MIN: -8, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -6, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 2.0, GAIN_MAX: 3.5, SOS_MIN: 10, SOS_MAX: 50 },
+            'PHILIPPINES': { label: 'Philippines', FREQ_MIN: 5, FREQ_MAX: 15, RECALL_META_CHANGE_MIN: -9, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -7, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 2.1, GAIN_MAX: 3.8, SOS_MIN: 15, SOS_MAX: 60 },
+            'INDONESIA': { label: 'Indonesia', FREQ_MIN: 5, FREQ_MAX: 14, RECALL_META_CHANGE_MIN: -10, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -7, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 2.3, GAIN_MAX: 4.0, SOS_MIN: 15, SOS_MAX: 60 },
+            
+            // LATAM
+            'MEXICO': { label: 'Mexico', FREQ_MIN: 5, FREQ_MAX: 15, RECALL_META_CHANGE_MIN: -11, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -8, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 2.2, GAIN_MAX: 4.0, SOS_MIN: 15, SOS_MAX: 60 },
+            'BRAZIL': { label: 'Brazil', FREQ_MIN: 6, FREQ_MAX: 17, RECALL_META_CHANGE_MIN: -10, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -7, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 2.5, GAIN_MAX: 4.5, SOS_MIN: 20, SOS_MAX: 70 },
+            'COLOMBIA': { label: 'Colombia', FREQ_MIN: 4, FREQ_MAX: 13, RECALL_META_CHANGE_MIN: -13, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -9, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 1.8, GAIN_MAX: 3.5, SOS_MIN: 10, SOS_MAX: 50 },
+            'CHILE': { label: 'Chile', FREQ_MIN: 4, FREQ_MAX: 12, RECALL_META_CHANGE_MIN: -9, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -6, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 1.5, GAIN_MAX: 3.0, SOS_MIN: 8, SOS_MAX: 45 },
+            
+            // EMEA
+            'KAZAKHSTAN': { label: 'Kazakhstan', FREQ_MIN: 2, FREQ_MAX: 10, RECALL_META_CHANGE_MIN: -7, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -5, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 1.2, GAIN_MAX: 2.5, SOS_MIN: 5, SOS_MAX: 40 },
+            'EGYPT': { label: 'Egypt', FREQ_MIN: 5, FREQ_MAX: 14, RECALL_META_CHANGE_MIN: -10, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -7, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 2.0, GAIN_MAX: 3.5, SOS_MIN: 15, SOS_MAX: 60 },
+            'MOROCCO': { label: 'Morocco', FREQ_MIN: 4, FREQ_MAX: 12, RECALL_META_CHANGE_MIN: -8, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -6, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 1.4, GAIN_MAX: 2.8, SOS_MIN: 7, SOS_MAX: 40 },
+            'ALGERIA': { label: 'Algeria', FREQ_MIN: 3, FREQ_MAX: 10, RECALL_META_CHANGE_MIN: -7, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -5, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 1.1, GAIN_MAX: 2.5, SOS_MIN: 5, SOS_MAX: 35 },
+            'SOUTH_AFRICA': { label: 'South Africa', FREQ_MIN: 4, FREQ_MAX: 13, RECALL_META_CHANGE_MIN: -9, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -7, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 1.9, GAIN_MAX: 3.3, SOS_MIN: 12, SOS_MAX: 55 },
+            'NIGERIA': { label: 'Nigeria', FREQ_MIN: 5, FREQ_MAX: 15, RECALL_META_CHANGE_MIN: -11, RECALL_META_CHANGE_MAX: 10, CONSID_YTB_CHANGE_MIN: -8, CONSID_YTB_CHANGE_MAX: 5, GAIN_MIN: 2.3, GAIN_MAX: 4.0, SOS_MIN: 15, SOS_MAX: 65 },
+        };
+
+        // --- 2. LOGIC HELPERS ---
+
+        const normalize = (value, min, max, reverse = false) => {
+            const clamped = Math.min(Math.max(value, min), max);
+            let normalized = (clamped - min) / (max - min);
+            return reverse ? 1 - normalized : normalized;
+        };
+
+        // --- 3. CUSTOM HOOK (LOGIC ENGINE) ---
+
+        const useWearOutCalculator = (inputs) => {
+            const { market, avgFrequency, metaAdRecallChange, youtubeConsiderationChange, awarenessGain, competitiveSoS, campaignDuration, numCampaigns, weeksPerCampaign, activeChannels, placementType, creativeType, videoDuration } = inputs;
+
+            // Load Config
+            const config = CONFIG_BY_COUNTRY[market] || CONFIG_BY_COUNTRY['PAKISTAN'];
+
+            // A. Primary Drivers (Normalized)
+            const frequencyFactor = normalize(avgFrequency, config.FREQ_MIN, config.FREQ_MAX, false);
+            const metaRecallFactor = normalize(metaAdRecallChange, config.RECALL_META_CHANGE_MIN, config.RECALL_META_CHANGE_MAX, true);
+            const youtubeConsiderationFactor = normalize(youtubeConsiderationChange, config.CONSID_YTB_CHANGE_MIN, config.CONSID_YTB_CHANGE_MAX, true);
+            const marginalGain = awarenessGain / Math.max(1, campaignDuration);
+            const effectivenessFactor = normalize(marginalGain, config.GAIN_MIN, config.GAIN_MAX, true);
+            const competitiveFactor = normalize(competitiveSoS, config.SOS_MIN, config.SOS_MAX, false);
+
+            // B. Contextual Drivers (Normalized)
+            const campaignCountFactor = normalize(numCampaigns, 1, 5, false);
+            const weeksPerCampaignFactor = normalize(weeksPerCampaign, 2, 8, false);
+            const placementFactor = placementType === 'national' ? 1 : 0.2;
+
+            // C. Creative Driver
+            const creativeTypeFactor = useMemo(() => {
+                if (creativeType === 'static') return 0.4;
+                // Video Logic
+                if (videoDuration <= 5) return 0.1;
+                if (videoDuration <= 10) return 0.3;
+                if (videoDuration <= 15) return 0.6;
+                return 1.0; // 30s+
+            }, [creativeType, videoDuration]);
+
+            // D. Channel Driver
+            const channelRiskContribution = useMemo(() => {
+                const channels = Array.isArray(activeChannels) ? activeChannels : [];
+                if (channels.length === 0) return 0;
+                const currentSum = channels.reduce((sum, c) => sum + (CHANNELS_SATURATION_RISK[c] || 0), 0);
+                const maxSum = Object.values(CHANNELS_SATURATION_RISK).reduce((a, b) => a + b, 0);
+                return (currentSum / maxSum) * CHANNELS_WEIGHT;
+            }, [activeChannels]);
+
+            // E. Scoring
+            const wearOutScore = useMemo(() => {
+                const FREQUENCY_WEIGHT = 25;
+                const META_RECALL_WEIGHT = 25;
+                const YOUTUBE_CONSID_WEIGHT = 20;
+                const EFFECTIVENESS_PENALTY_WEIGHT = 25;
+                const COMPETITIVE_WEIGHT = 15;
+                const CAMPAIGN_COUNT_WEIGHT = 10;
+                const WEEKS_PER_CAMPAIGN_WEIGHT = 10;
+                const PLACEMENT_TYPE_WEIGHT = 5;
+
+                const rawScore = 
+                    (frequencyFactor * FREQUENCY_WEIGHT) +
+                    (metaRecallFactor * META_RECALL_WEIGHT) +
+                    (youtubeConsiderationFactor * YOUTUBE_CONSID_WEIGHT) +
+                    (effectivenessFactor * EFFECTIVENESS_PENALTY_WEIGHT) +
+                    (competitiveFactor * COMPETITIVE_WEIGHT) +
+                    (campaignCountFactor * CAMPAIGN_COUNT_WEIGHT) +
+                    (weeksPerCampaignFactor * WEEKS_PER_CAMPAIGN_WEIGHT) +
+                    (placementFactor * PLACEMENT_TYPE_WEIGHT) +
+                    (creativeTypeFactor * CREATIVE_TYPE_WEIGHT) +
+                    channelRiskContribution;
+
+                return Math.round(Math.min(rawScore, 100));
+            }, [frequencyFactor, metaRecallFactor, youtubeConsiderationFactor, effectivenessFactor, competitiveFactor, campaignCountFactor, weeksPerCampaignFactor, placementFactor, creativeTypeFactor, channelRiskContribution]);
+
+            const riskClassification = useMemo(() => {
+                if (wearOutScore >= 70) return { label: "HIGH RISK (Urgent Refresh)", color: "bg-red-600", text: "text-red-700" };
+                if (wearOutScore >= 40) return { label: "MODERATE RISK (Monitor)", color: "bg-yellow-500", text: "text-yellow-700" };
+                return { label: "LOW RISK (Optimal)", color: "bg-green-500", text: "text-green-700" };
+            }, [wearOutScore]);
+
+            return { wearOutScore, riskClassification, config };
+        };
+
+        // --- 4. COMPONENTS ---
+
+        const ChannelCheckbox = ({ channel, activeChannels, onChange }) => (
+            <label className="flex items-center space-x-2 cursor-pointer p-2 rounded hover:bg-slate-50 transition">
+                <input
+                    type="checkbox"
+                    value={channel}
+                    checked={activeChannels.includes(channel)}
+                    onChange={onChange}
+                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
+                />
+                <span className="text-sm font-medium text-slate-700">{channel}</span>
+            </label>
+        );
+
+        const InputField = ({ label, name, value, unit, description, type = 'number', options, onChange }) => (
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-200">
+                <label className="block text-sm font-bold text-slate-800 mb-2">{label}</label>
+                <div className="flex rounded-lg shadow-sm ring-1 ring-slate-200 overflow-hidden">
+                    {type === 'select' ? (
+                        <select
+                            name={name}
+                            value={value}
+                            onChange={onChange}
+                            className="flex-1 border-none bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+                        >
+                            {options.map(opt => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
+                    ) : (
+                        <React.Fragment>
+                            <input
+                                type="number"
+                                name={name}
+                                value={value}
+                                onChange={onChange}
+                                step="0.1"
+                                className="flex-1 border-none bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+                            />
+                            {unit && (
+                                <span className="bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500 border-l border-slate-200 flex items-center">
+                                    {unit}
+                                </span>
+                            )}
+                        </React.Fragment>
+                    )}
+                </div>
+                <p className="mt-2 text-xs text-slate-500 leading-tight">{description}</p>
+            </div>
+        );
+
+        // --- 5. MAIN APP COMPONENT ---
+
+        const App = () => {
+            const [inputs, setInputs] = useState({
+                market: 'PAKISTAN',
+                avgFrequency: 8,
+                metaAdRecallChange: 0,
+                youtubeConsiderationChange: 0,
+                awarenessGain: 2,
+                competitiveSoS: 25,
+                campaignDuration: 4,
+                numCampaigns: 2,
+                weeksPerCampaign: 4,
+                activeChannels: ['TV', 'META', 'Youtube'],
+                placementType: 'national',
+                creativeType: 'video',
+                videoDuration: 30,
+            });
+
+            const { wearOutScore, riskClassification, config } = useWearOutCalculator(inputs);
+
+            const handleInputChange = (e) => {
+                const { name, value } = e.target;
+                const isNumeric = !['market', 'placementType', 'creativeType'].includes(name);
+                setInputs(prev => ({ ...prev, [name]: isNumeric ? parseFloat(value) || 0 : value }));
+            };
+
+            const handleChannelChange = (e) => {
+                const { value, checked } = e.target;
+                setInputs(prev => ({
+                    ...prev,
+                    activeChannels: checked 
+                        ? [...prev.activeChannels, value] 
+                        : prev.activeChannels.filter(c => c !== value)
+                }));
+            };
+
+            return (
+                <div className="min-h-screen py-10 px-4 flex justify-center items-start">
+                    <div className="w-full max-w-5xl bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100">
+                        {/* Header */}
+                        <div className="bg-blue-700 p-8 text-center text-white">
+                            <h1 className="text-3xl font-extrabold tracking-tight mb-2">Global Ad Wear-Out Risk Indicator</h1>
+                            <p className="text-blue-100 opacity-90">Calibrated Saturation & Creative Fatigue Calculator</p>
+                        </div>
+
+                        <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            
+                            {/* LEFT COLUMN: Controls */}
+                            <div className="lg:col-span-2 space-y-8">
+                                
+                                {/* Section 1 */}
+                                <div>
+                                    <h2 className="text-lg font-bold text-blue-800 border-b-2 border-blue-100 pb-2 mb-4">1. Market & Creative Strategy</h2>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <InputField 
+                                            label="Target Market" name="market" type="select" value={inputs.market} onChange={handleInputChange}
+                                            options={Object.keys(CONFIG_BY_COUNTRY).map(k => ({ value: k, label: CONFIG_BY_COUNTRY[k].label }))}
+                                            description="Loads country-specific thresholds for OTS and decay."
+                                        />
+                                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                            <label className="block text-sm font-bold text-slate-800 mb-2">Active Channels</label>
+                                            <div className="grid grid-cols-2 gap-1">
+                                                {Object.keys(CHANNELS_SATURATION_RISK).map(c => (
+                                                    <ChannelCheckbox key={c} channel={c} activeChannels={inputs.activeChannels} onChange={handleChannelChange} />
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <InputField 
+                                            label="Creative Type" name="creativeType" type="select" value={inputs.creativeType} onChange={handleInputChange}
+                                            options={[{value: 'video', label: 'Video'}, {value: 'static', label: 'Static Image'}]}
+                                            description="Video formats generally wear out faster than static assets."
+                                        />
+                                        {inputs.creativeType === 'video' && (
+                                            <InputField 
+                                                label="Video Duration" name="videoDuration" type="select" value={inputs.videoDuration} onChange={handleInputChange}
+                                                options={[{value: 30, label: '30 Seconds'}, {value: 15, label: '15 Seconds'}, {value: 10, label: '10 Seconds'}, {value: 5, label: '5 Seconds'}]}
+                                                description="Shorter videos (5-10s) have lower fatigue risk."
+                                            />
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Section 2 */}
+                                <div>
+                                    <h2 className="text-lg font-bold text-blue-800 border-b-2 border-blue-100 pb-2 mb-4">2. Performance Metrics</h2>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <InputField 
+                                            label="Avg Frequency (OTS)" name="avgFrequency" value={inputs.avgFrequency} onChange={handleInputChange} unit="x"
+                                            description={`Max risk at ${config.FREQ_MAX} OTS for this market.`}
+                                        />
+                                        <InputField 
+                                            label="Awareness Gain (Gross)" name="awarenessGain" value={inputs.awarenessGain} onChange={handleInputChange} unit="pts"
+                                            description="Total uplift in Unaided Awareness during campaign."
+                                        />
+                                        <InputField 
+                                            label="Δ Meta Ad Recall" name="metaAdRecallChange" value={inputs.metaAdRecallChange} onChange={handleInputChange} unit="pts"
+                                            description={`Critical drop point: ${config.RECALL_META_CHANGE_MIN} pts.`}
+                                        />
+                                        <InputField 
+                                            label="Δ YT Consideration" name="youtubeConsiderationChange" value={inputs.youtubeConsiderationChange} onChange={handleInputChange} unit="pts"
+                                            description={`Critical drop point: ${config.CONSID_YTB_CHANGE_MIN} pts.`}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Section 3 */}
+                                <div>
+                                    <h2 className="text-lg font-bold text-blue-800 border-b-2 border-blue-100 pb-2 mb-4">3. Contextual Factors</h2>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <InputField 
+                                            label="Competitive SoS" name="competitiveSoS" value={inputs.competitiveSoS} onChange={handleInputChange} unit="%"
+                                            description={`Risk increases if SoS < ${config.SOS_MIN}%.`}
+                                        />
+                                        <InputField 
+                                            label="Campaign Duration" name="campaignDuration" value={inputs.campaignDuration} onChange={handleInputChange} unit="wks"
+                                            description="Used to calculate marginal weekly efficiency."
+                                        />
+                                        <InputField 
+                                            label="Creative Launches" name="numCampaigns" value={inputs.numCampaigns} onChange={handleInputChange} unit="#"
+                                            description="Times this creative has been re-used."
+                                        />
+                                        <InputField 
+                                            label="Placement Scope" name="placementType" type="select" value={inputs.placementType} onChange={handleInputChange}
+                                            options={[{value: 'national', label: 'National'}, {value: 'city', label: 'City-wise'}]}
+                                            description="National campaigns saturate audiences faster."
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* RIGHT COLUMN: Results */}
+                            <div className="lg:col-span-1">
+                                <div className="sticky top-8 bg-slate-50 border border-slate-200 rounded-2xl p-6 shadow-inner flex flex-col items-center text-center h-full justify-center">
+                                    
+                                    <h3 className="text-xl font-black text-slate-700 mb-6 uppercase tracking-widest">Risk Score</h3>
+                                    
+                                    {/* Gauge Visual */}
+                                    <div className="relative w-64 h-64 mb-6">
+                                        <svg className="w-full h-full transform -rotate-90">
+                                            <circle cx="128" cy="128" r="110" stroke="currentColor" strokeWidth="15" fill="transparent" className="text-slate-200" />
+                                            <circle cx="128" cy="128" r="110" stroke="currentColor" strokeWidth="15" fill="transparent" 
+                                                strokeDasharray={2 * Math.PI * 110}
+                                                strokeDashoffset={(2 * Math.PI * 110) * (1 - wearOutScore / 100)}
+                                                strokeLinecap="round"
+                                                className={`risk-dial-circle ${riskClassification.text}`}
+                                            />
+                                        </svg>
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <span className={`text-7xl font-black ${riskClassification.text}`}>{wearOutScore}</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Badge */}
+                                    <div className={`px-6 py-3 rounded-full text-white font-bold text-sm uppercase tracking-wide shadow-lg mb-8 ${riskClassification.color}`}>
+                                        {riskClassification.label}
+                                    </div>
+
+                                    {/* Interpretation */}
+                                    <div className="text-left w-full space-y-4 border-t border-slate-200 pt-6">
+                                        <div>
+                                            <span className="block text-xs font-bold text-slate-400 uppercase">Selected Market</span>
+                                            <span className="font-semibold text-slate-800">{config.label}</span>
+                                        </div>
+                                        <div>
+                                            <span className="block text-xs font-bold text-slate-400 uppercase">Max OTS Threshold</span>
+                                            <span className="font-semibold text-slate-800">{config.FREQ_MAX} exposures</span>
+                                        </div>
+                                        <div>
+                                            <span className="block text-xs font-bold text-slate-400 uppercase">Critical Meta Drop</span>
+                                            <span className="font-semibold text-slate-800">{config.RECALL_META_CHANGE_MIN} pts</span>
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
